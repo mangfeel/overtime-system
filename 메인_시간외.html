@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>시간외근무관리</title>
+    <link rel="stylesheet" href="css/스타일_시간외.css">
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
+</head>
+<body>
+    <!-- ===== 인사앱 미연결 차단 화면 ===== -->
+    <div id="blockScreen" class="block-screen" style="display: none;">
+        <div class="block-content">
+            <div class="block-icon">⚠️</div>
+            <h2 id="blockTitle">인사관리 시스템 연결 필요</h2>
+            <p id="blockMessage">인사관리 시스템이 설치되지 않았거나 직원 데이터가 없습니다.</p>
+            <p class="block-sub">인사관리 시스템을 먼저 설치하고 실행해주세요.</p>
+            <div class="block-buttons">
+                <button onclick="retryConnection()" class="btn btn-primary">다시 확인</button>
+                <button onclick="window.electronAPI?.quitApp()" class="btn btn-outline">종료</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 헤더 -->
+    <div class="header">
+        <h1>🕐 시간외근무관리 <span id="orgName" style="font-size:14px;font-weight:400;opacity:0.9;margin-left:10px;"></span></h1>
+        <div class="header-info">
+            <span id="headerDate"></span> | 
+            <span id="headerEmployeeCount">직원 0명</span> |
+            <span id="hrStatus" style="font-size:12px;">
+                <span class="status-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:4px;"></span>
+                인사앱 연결됨
+            </span>
+            <span id="appVersion" style="font-size:11px;opacity:0.7;margin-left:10px;"></span>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- 탭 네비게이션 -->
+        <div class="tab-nav">
+            <button class="tab-btn active" data-tab="weekly" onclick="switchTab('weekly')">📈 주월간현황</button>
+            <button class="tab-btn" data-tab="attendance" onclick="switchTab('attendance')">🕐 근태 등록</button>
+            <button class="tab-btn" data-tab="daily" onclick="switchTab('daily')">📅 연장근로등록</button>
+            <button class="tab-btn" data-tab="monthly" onclick="switchTab('monthly')">📊 월별 집계</button>
+            <button class="tab-btn" data-tab="report" onclick="switchTab('report')">📋 상세 보고서</button>
+            <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">⚙️ 설정</button>
+        </div>
+
+        <div id="tab-weekly" class="tab-content active">
+            <div class="alert alert-info">
+                <span>💡</span>
+                <span>주간 시간외근무 현황을 확인합니다. 1주(월~일) 최대 인정시간은 <strong>12시간</strong>입니다. 초과 시 빨간색으로 표시됩니다.</span>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">📈 주간 시간외근무 현황 (12시간 초과 감지)</div>
+                
+                <div class="filter-section">
+                    <div class="filter-group">
+                        <label>기준 주:</label>
+                        <button class="btn btn-sm" onclick="changeWeek(-1)" style="padding:5px 10px;">◀ 이전</button>
+                        <span id="weeklyDateRange" style="padding:0 15px;font-weight:600;min-width:200px;text-align:center;"></span>
+                        <button class="btn btn-sm" onclick="changeWeek(1)" style="padding:5px 10px;">다음 ▶</button>
+                        <button class="btn btn-sm" onclick="goToCurrentWeek()" style="margin-left:10px;">오늘</button>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>
+                            <input type="checkbox" id="weeklyShowOverOnly" onchange="generateWeeklyReport()">
+                            12시간 초과만 표시
+                        </label>
+                    </div>
+                    
+                    <button class="btn btn-primary" onclick="generateWeeklyReport()">
+                        🔍 조회
+                    </button>
+                </div>
+                
+                <!-- 직원 검색 -->
+                <div style="margin-bottom:15px;display:flex;align-items:center;gap:10px;">
+                    <label style="font-weight:500;">🔎 직원 검색:</label>
+                    <input type="text" id="weeklySearchInput" class="form-control" 
+                           placeholder="이름 또는 부서 입력" 
+                           style="width:200px;"
+                           oninput="filterWeeklyTable()">
+                    <button class="btn btn-sm" onclick="document.getElementById('weeklySearchInput').value='';filterWeeklyTable();" style="padding:5px 10px;">✕ 초기화</button>
+                    <span id="weeklySearchCount" style="color:#6b7280;font-size:13px;"></span>
+                </div>
+                
+                <div id="weeklyReportContainer">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📈</div>
+                        <div class="empty-state-text">조회 버튼을 클릭하세요</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 월간 수당 20시간 초과 현황 -->
+            <div class="card" style="margin-top:20px;">
+                <div class="card-title">💰 월간 수당 현황 (20시간 초과 감지)</div>
+                
+                <div class="filter-section">
+                    <div class="filter-group">
+                        <label>연월:</label>
+                        <select id="monthlyPayOverYear" class="form-control" style="width:100px;"></select>
+                        <select id="monthlyPayOverMonth" class="form-control" style="width:80px;"></select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>
+                            <input type="checkbox" id="monthlyPayOverOnly" onchange="generateMonthlyPayOverReport()">
+                            20시간 초과만 표시
+                        </label>
+                    </div>
+                    
+                    <button class="btn btn-primary" onclick="generateMonthlyPayOverReport()">
+                        🔍 조회
+                    </button>
+                </div>
+                
+                <!-- 직원 검색 -->
+                <div style="margin-bottom:15px;display:flex;align-items:center;gap:10px;">
+                    <label style="font-weight:500;">🔎 직원 검색:</label>
+                    <input type="text" id="monthlyPaySearchInput" class="form-control" 
+                           placeholder="이름 또는 부서 입력" 
+                           style="width:200px;"
+                           oninput="filterMonthlyPayTable()">
+                    <button class="btn btn-sm" onclick="document.getElementById('monthlyPaySearchInput').value='';filterMonthlyPayTable();" style="padding:5px 10px;">✕ 초기화</button>
+                    <span id="monthlyPaySearchCount" style="color:#6b7280;font-size:13px;"></span>
+                </div>
+                
+                <div id="monthlyPayOverContainer">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">💰</div>
+                        <div class="empty-state-text">조회 버튼을 클릭하세요</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="tab-daily" class="tab-content">
+            <div class="alert alert-info">
+                <span>💡</span>
+                <span>날짜를 선택하고 해당 날짜의 시간외근무를 일괄 등록하세요. 시작시간 입력 시 조근/야근이 자동 설정됩니다.</span>
+            </div>
+            
+            <!-- 시간외근무 등록 현황 달력 -->
+            <div class="card" style="margin-bottom:15px;">
+                <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+                    <span>📆 시간외근무 등록 현황</span>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <button class="btn btn-sm" onclick="changeOvertimeCalendarMonth(-1)">◀</button>
+                        <select id="overtimeCalendarYear" class="form-control" style="width:90px;" onchange="loadOvertimeCalendar()"></select>
+                        <select id="overtimeCalendarMonth" class="form-control" style="width:70px;" onchange="loadOvertimeCalendar()">
+                            <option value="1">1월</option>
+                            <option value="2">2월</option>
+                            <option value="3">3월</option>
+                            <option value="4">4월</option>
+                            <option value="5">5월</option>
+                            <option value="6">6월</option>
+                            <option value="7">7월</option>
+                            <option value="8">8월</option>
+                            <option value="9">9월</option>
+                            <option value="10">10월</option>
+                            <option value="11">11월</option>
+                            <option value="12">12월</option>
+                        </select>
+                        <button class="btn btn-sm" onclick="changeOvertimeCalendarMonth(1)">▶</button>
+                    </div>
+                </div>
+                <div id="overtimeCalendarContainer">
+                    <div class="overtime-calendar">
+                        <div class="calendar-header">일</div>
+                        <div class="calendar-header">월</div>
+                        <div class="calendar-header">화</div>
+                        <div class="calendar-header">수</div>
+                        <div class="calendar-header">목</div>
+                        <div class="calendar-header">금</div>
+                        <div class="calendar-header">토</div>
+                    </div>
+                    <div class="empty-state" style="padding:20px;">달력을 불러오는 중...</div>
+                </div>
+                <div style="margin-top:10px;font-size:11px;color:#6b7280;display:flex;gap:15px;flex-wrap:wrap;">
+                    <span>🟢 평일등록</span>
+                    <span>🟡 휴일등록</span>
+                    <span>⬜ 미등록</span>
+                    <span>|</span>
+                    <span>🌅 조근</span>
+                    <span>🌙 야근</span>
+                    <span>📅 휴일</span>
+                    <span>|</span>
+                    <span style="color:#666;">💡 날짜에 마우스를 올리면 상세 정보</span>
+                </div>
+            </div>
+            
+            <!-- 날짜 및 모드 선택 -->
+            <div class="filter-section">
+                <div class="filter-group">
+                    <label>날짜:</label>
+                    <input type="date" id="bulkInputDate" class="form-control" style="width:160px;" onchange="onBulkDateChange()">
+                    <span id="bulkDateInfo" class="badge badge-weekday" style="margin-left:8px;"></span>
+                </div>
+                
+                <div class="filter-group">
+                    <label>입력 방식:</label>
+                    <label class="radio-label" style="margin-left:10px;cursor:pointer;">
+                        <input type="radio" name="bulkInputMode" value="add" checked onchange="switchBulkInputMode()"> 직원 추가
+                    </label>
+                    <label class="radio-label" style="margin-left:15px;cursor:pointer;">
+                        <input type="radio" name="bulkInputMode" value="all" onchange="switchBulkInputMode()"> 전체 직원
+                    </label>
+                </div>
+            </div>
+            
+            <!-- 모드 1: 직원 추가 방식 -->
+            <div id="bulkModeAdd" class="card">
+                <div class="card-title">👤 직원 추가</div>
+                <div class="filter-section" style="margin-bottom:0;">
+                    <div class="filter-group">
+                        <label>직원 검색:</label>
+                        <div class="search-select-wrapper" style="position:relative;">
+                            <input type="text" id="bulkEmployeeSearch" class="form-control" style="width:200px;" 
+                                   placeholder="이름/부서 검색" 
+                                   oninput="filterBulkEmployeeList()" 
+                                   onfocus="showBulkEmployeeDropdown()"
+                                   onkeydown="onBulkEmployeeSearchKeydown(event)"
+                                   autocomplete="off">
+                            <div id="bulkEmployeeDropdown" class="search-dropdown" style="display:none;"></div>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" onclick="addSelectedEmployeeToBulk()">
+                        ➕ 추가
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 모드 2: 전체 직원 방식 (숨김) -->
+            <div id="bulkModeAll" class="card" style="display:none;">
+                <div class="card-title">👥 전체 직원</div>
+                <div class="filter-section" style="margin-bottom:0;">
+                    <button class="btn btn-primary" onclick="loadAllEmployeesToBulk()">
+                        👥 전체 직원 불러오기
+                    </button>
+                    <button class="btn btn-outline" onclick="resetBulkInput()" style="margin-left:8px;">
+                        🔄 초기화
+                    </button>
+                    <div class="filter-group" style="margin-left:20px;">
+                        <label>부서:</label>
+                        <select id="bulkDeptFilter" class="form-control" style="width:150px;" onchange="filterBulkAllEmployees()">
+                            <option value="">전체</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>검색:</label>
+                        <input type="text" id="bulkAllSearchFilter" class="form-control" style="width:150px;" 
+                               placeholder="이름 검색" oninput="filterBulkAllEmployees()">
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 일괄 입력 테이블 -->
+            <div class="card">
+                <div class="card-title">
+                    📋 시간외근무 입력
+                    <span id="bulkInputCount" style="font-size:14px;font-weight:normal;color:#6b7280;margin-left:10px;">(0명)</span>
+                </div>
+                
+                <div id="bulkInputTableContainer">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📅</div>
+                        <div class="empty-state-text">날짜를 선택하고 직원을 추가하세요</div>
+                    </div>
+                </div>
+                
+                <div id="bulkInputActions" style="display:none;margin-top:15px;padding-top:15px;border-top:1px solid #e5e7eb;">
+                    <button class="btn btn-primary btn-lg" onclick="saveBulkInput()" title="Ctrl+S">
+                        💾 일괄 저장 (Ctrl+S)
+                    </button>
+                    <button class="btn btn-outline" onclick="clearBulkInput()" style="margin-left:10px;">
+                        🗑️ 전체 삭제
+                    </button>
+                    <span id="bulkSaveInfo" style="margin-left:15px;color:#6b7280;font-size:13px;"></span>
+                </div>
+            </div>
+        </div>
+
+        <div id="tab-monthly" class="tab-content">
+            <div class="filter-section">
+                <div class="filter-group">
+                    <label>연월:</label>
+                    <select id="monthlyYear" class="form-control" style="width:100px;"></select>
+                    <select id="monthlyMonth" class="form-control" style="width:80px;"></select>
+                </div>
+                
+                <button class="btn btn-primary" onclick="generateMonthlyReport()">
+                    📊 조회
+                </button>
+                
+                <button class="btn btn-success" onclick="downloadExcel()">
+                    📥 엑셀
+                </button>
+                
+                <button class="btn btn-secondary" onclick="printReport()">
+                    🖨️ 인쇄
+                </button>
+            </div>
+            
+            <!-- 부서 체크박스 필터 -->
+            <div class="filter-section" style="margin-top:10px;padding:10px;background:#f8fafc;border-radius:6px;">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                    <label style="font-weight:600;margin-right:10px;">📂 부서 선택:</label>
+                    <label style="cursor:pointer;">
+                        <input type="checkbox" id="monthlyDeptAll" checked onchange="toggleAllMonthlyDepts(this.checked)"> 
+                        <strong>전체</strong>
+                    </label>
+                    <span style="color:#ccc;">|</span>
+                    <div id="monthlyDeptCheckboxes" style="display:flex;flex-wrap:wrap;gap:10px;"></div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">📊 월별 시간외근무 집계</div>
+                <div id="monthlyReportContainer">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📊</div>
+                        <div class="empty-state-text">조회 버튼을 클릭하세요</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="tab-report" class="tab-content">
+            <div class="alert alert-info">
+                <span>💡</span>
+                <span>직원별 시간외근무 상세 내역을 조회합니다. 구글 스프레드시트 보고서 형식과 동일합니다.</span>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">📋 시간외근무 상세 보고서</div>
+                
+                <div class="filter-section">
+                    <div class="filter-group">
+                        <label>연도:</label>
+                        <select id="reportYear" class="form-control" style="width:100px;"></select>
+                    </div>
+                    <div class="filter-group">
+                        <label>월:</label>
+                        <select id="reportMonth" class="form-control" style="width:80px;"></select>
+                    </div>
+                    <div class="filter-group">
+                        <label>보상:</label>
+                        <select id="reportCompType" class="form-control" style="width:100px;">
+                            <option value="pay" selected>수당</option>
+                            <option value="leave">대휴</option>
+                        </select>
+                    </div>
+                    
+                    <button class="btn btn-primary" onclick="generateDetailReport()">
+                        🔍 조회
+                    </button>
+                    <button class="btn btn-success" onclick="downloadDetailExcel()">
+                        📥 엑셀
+                    </button>
+                    <button class="btn btn-secondary" onclick="printDetailReport()">
+                        🖨️ 인쇄
+                    </button>
+                </div>
+                
+                <!-- 부서 체크박스 필터 -->
+                <div class="filter-section" style="margin-top:10px;padding:10px;background:#f8fafc;border-radius:6px;">
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                        <label style="font-weight:600;margin-right:10px;">📂 부서 선택:</label>
+                        <label style="cursor:pointer;">
+                            <input type="checkbox" id="reportDeptAll" checked onchange="toggleAllReportDepts(this.checked)"> 
+                            <strong>전체</strong>
+                        </label>
+                        <span style="color:#ccc;">|</span>
+                        <div id="reportDeptCheckboxes" style="display:flex;flex-wrap:wrap;gap:10px;"></div>
+                    </div>
+                </div>
+                
+                <div id="detailReportContainer">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📋</div>
+                        <div class="empty-state-text">연도/월을 선택하고 조회 버튼을 클릭하세요</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="tab-attendance" class="tab-content">
+            <div class="alert alert-info">
+                <span>💡</span>
+                <span>엑셀에서 복사한 출퇴근 기록을 붙여넣어 등록하세요. 두 가지 형식을 자동 인식합니다.</span>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">📥 근태 데이터 입력</div>
+                
+                <div class="filter-section">
+                    <div class="filter-group">
+                        <label>연도:</label>
+                        <select id="attendanceYear" class="form-control" style="width:100px;" onchange="onAttendancePeriodChange()"></select>
+                    </div>
+                    <div class="filter-group">
+                        <label>월:</label>
+                        <select id="attendanceMonth" class="form-control" style="width:80px;" onchange="onAttendancePeriodChange()"></select>
+                    </div>
+                    <button class="btn btn-primary" onclick="loadAttendanceCalendar()">조회</button>
+                </div>
+                
+                <div style="margin-top:15px;">
+                    <div style="margin-bottom:10px;font-weight:500;">지원 형식 (하루치 또는 한달치 모두 가능):</div>
+                    <div style="display:flex;gap:20px;margin-bottom:15px;">
+                        <div class="alert" style="flex:1;margin:0;background:#f0fdf4;border-color:#22c55e;">
+                            <strong>형식 1 (엑셀 복사)</strong><br>
+                            <code style="font-size:11px;">이름 | 근무일자 | 카드번호 | 출근일시 | 퇴근일시</code><br>
+                            <span style="font-size:11px;color:#666;">엑셀에서 그대로 복사 (하루~한달치)</span>
+                        </div>
+                        <div class="alert" style="flex:1;margin:0;background:#eff6ff;border-color:#3b82f6;">
+                            <strong>형식 2 (날짜별 그룹)</strong><br>
+                            <code style="font-size:11px;">날짜 행 + 생년월일 | 이름 | 출근 | 퇴근</code><br>
+                            <span style="font-size:11px;color:#666;">날짜 헤더 아래 직원 데이터 (하루~한달치)</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>엑셀 데이터 붙여넣기:</label>
+                    <textarea id="attendancePasteArea" class="form-control" rows="10" 
+                        placeholder="엑셀에서 복사한 데이터를 여기에 붙여넣으세요 (하루치~한달치 모두 가능)&#10;&#10;[형식 1] 엑셀 그대로 복사:&#10;홍길동	2025-12-01	850220***	2025-12-01 8:42	2025-12-01 21:08&#10;김철수	2025-12-01	740905***	2025-12-01 7:06	2025-12-01 18:01&#10;&#10;[형식 2] 날짜별 그룹:&#10;2025-11-03&#10;	960918		이영희		08:51:03	21:05:44"
+                        style="font-family:monospace;font-size:12px;"></textarea>
+                </div>
+                
+                <div style="display:flex;gap:10px;margin-top:15px;">
+                    <button class="btn btn-primary" onclick="parseAndSaveAttendance()" title="Ctrl+S">
+                        💾 데이터 등록 (Ctrl+S)
+                    </button>
+                    <button class="btn btn-outline" onclick="parseAttendanceData()">
+                        👁️ 미리보기만
+                    </button>
+                    <button class="btn btn-outline" onclick="clearAttendancePaste()">
+                        🗑️ 입력창 비우기
+                    </button>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">👁️ 파싱 결과 미리보기</div>
+                <div id="attendancePreviewContainer">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📋</div>
+                        <div class="empty-state-text">데이터를 붙여넣고 '데이터 등록' 버튼을 클릭하세요</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">📅 월별 근태 현황</div>
+                
+                <div class="filter-section">
+                    <button class="btn btn-primary" onclick="loadAttendanceCalendar()">
+                        🔍 조회
+                    </button>
+                    <div class="filter-group">
+                        <label>날짜 지정 삭제:</label>
+                        <input type="date" id="attendanceDeleteDate" class="form-control" style="width:150px;">
+                    </div>
+                    <button class="btn btn-outline" onclick="clearDateAttendance()">
+                        🗑️ 해당 날짜 삭제
+                    </button>
+                    <button class="btn btn-outline" onclick="clearMonthAttendance()" style="color:#ef4444;">
+                        🗑️ 월 전체 삭제
+                    </button>
+                </div>
+                
+                <div id="attendanceCalendarContainer">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📅</div>
+                        <div class="empty-state-text">조회 버튼을 클릭하여 월별 근태 현황을 확인하세요</div>
+                    </div>
+                </div>
+                
+                <!-- 상세 목록 토글 -->
+                <div style="margin-top:20px;">
+                    <button class="btn btn-outline" onclick="toggleAttendanceList()" id="btnToggleList">
+                        📋 상세 목록 보기
+                    </button>
+                </div>
+                <div id="attendanceListContainer" style="display:none;margin-top:15px;"></div>
+            </div>
+        </div>
+
+        <div id="tab-settings" class="tab-content">
+            <div class="card">
+                <div class="card-title">⚙️ 시간외근무 유형 설정</div>
+                <div class="alert alert-info">
+                    <span>💡</span>
+                    <span>사용할 시간외근무 유형을 선택하세요. 선택된 유형만 입력 화면에 표시됩니다.</span>
+                </div>
+                
+                <div id="overtimeTypeSettings"></div>
+                
+                <div style="margin-top:20px;">
+                    <button class="btn btn-primary" onclick="saveOvertimeTypeSettings()">
+                        💾 설정 저장
+                    </button>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">📅 공휴일 관리</div>
+                <div class="alert alert-info">
+                    <span>💡</span>
+                    <span>설날, 추석 등 매년 달라지는 공휴일을 등록하세요. 고정 공휴일(삼일절, 광복절 등)은 자동 적용됩니다.</span>
+                </div>
+                
+                <div class="filter-section" style="margin-bottom:15px;">
+                    <div class="filter-group">
+                        <label>연도:</label>
+                        <select id="holidayYear" class="form-control" style="width:100px;" onchange="renderHolidayList()"></select>
+                    </div>
+                    
+                    <button class="btn btn-primary" onclick="openAddHolidayModal()">
+                        ➕ 공휴일 추가
+                    </button>
+                    
+                    <button class="btn btn-outline" onclick="copyPrevYearHolidays()">
+                        📋 전년도 복사
+                    </button>
+                </div>
+                
+                <div id="holidayListContainer"></div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">⏱️ 시간외근무 제한 설정</div>
+                <div class="alert alert-info">
+                    <span>💡</span>
+                    <span>기관별 시간외근무 제한 시간을 설정합니다. 주간현황에서 초과 여부를 확인할 수 있습니다.</span>
+                </div>
+                
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:15px;">
+                    <div style="padding:20px;background:#fef3c7;border-radius:8px;border:1px solid #f59e0b;">
+                        <h4 style="margin:0 0 10px 0;color:#92400e;">📅 주간 제한 (월~일)</h4>
+                        <p style="font-size:13px;color:#92400e;margin-bottom:15px;">
+                            수당 + 대휴 합산 인정시간 제한
+                        </p>
+                        <div style="display:flex;align-items:center;gap:10px;">
+                            <input type="number" id="weeklyLimitHours" class="form-control" 
+                                   value="12" min="1" max="40" style="width:80px;text-align:center;font-size:16px;font-weight:600;">
+                            <span style="color:#92400e;font-weight:500;">시간</span>
+                        </div>
+                    </div>
+                    
+                    <div style="padding:20px;background:#dbeafe;border-radius:8px;border:1px solid #3b82f6;">
+                        <h4 style="margin:0 0 10px 0;color:#1e40af;">📆 월간 수당 제한</h4>
+                        <p style="font-size:13px;color:#1e40af;margin-bottom:15px;">
+                            수당만 (대휴 제외) 인정시간 제한
+                        </p>
+                        <div style="display:flex;align-items:center;gap:10px;">
+                            <input type="number" id="monthlyPayLimitHours" class="form-control" 
+                                   value="20" min="1" max="100" style="width:80px;text-align:center;font-size:16px;font-weight:600;">
+                            <span style="color:#1e40af;font-weight:500;">시간</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="margin-top:20px;">
+                    <button class="btn btn-primary" onclick="saveLimitSettings()">
+                        💾 제한 설정 저장
+                    </button>
+                    <span id="limitSaveStatus" style="margin-left:15px;color:#22c55e;font-size:13px;"></span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">💾 데이터 백업/복원</div>
+                <div class="alert alert-info">
+                    <span>💡</span>
+                    <span>시간외근무, 근태기록, 공휴일 설정 등 이 시스템에서 등록한 모든 데이터를 백업하고 복원할 수 있습니다.</span>
+                </div>
+                
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:15px;">
+                    <div style="padding:20px;background:#f0fdf4;border-radius:8px;border:1px solid #22c55e;">
+                        <h4 style="margin:0 0 10px 0;color:#166534;">📤 백업</h4>
+                        <p style="font-size:13px;color:#166534;margin-bottom:15px;">
+                            현재 저장된 모든 데이터를 JSON 파일로 다운로드합니다.
+                        </p>
+                        <button class="btn btn-primary" onclick="backupAllData()" style="width:100%;">
+                            📥 백업 파일 저장 (.hrm)
+                        </button>
+                    </div>
+                    
+                    <div style="padding:20px;background:#fef3c7;border-radius:8px;border:1px solid #f59e0b;">
+                        <h4 style="margin:0 0 10px 0;color:#92400e;">📥 복원</h4>
+                        <p style="font-size:13px;color:#92400e;margin-bottom:15px;">
+                            백업 파일을 선택하여 데이터를 복원합니다.<br>
+                            <strong>⚠️ 기존 데이터가 덮어씌워집니다.</strong>
+                        </p>
+                        <button class="btn" onclick="restoreFromFile()" style="width:100%;background:#f59e0b;color:white;">
+                            📂 백업 파일 선택 (.hrm / .json)
+                        </button>
+                    </div>
+                </div>
+                
+                <div style="margin-top:15px;padding:15px;background:#f8fafc;border-radius:8px;">
+                    <h4 style="margin:0 0 10px 0;color:#374151;">📋 백업 항목</h4>
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:13px;">
+                        <div>✅ 시간외근무 기록</div>
+                        <div>✅ 근태 기록</div>
+                        <div>✅ 공휴일 설정</div>
+                        <div>✅ 시간외 유형 설정</div>
+                        <div>✅ 제한 설정 (주/월)</div>
+                        <div>⚠️ 겸직/직무대리 (참고용)</div>
+                        <div>⚠️ 인사정보 (참고용)</div>
+                    </div>
+                    <div style="margin-top:10px;font-size:12px;color:#6b7280;">
+                        ※ 인사정보, 겸직/직무대리는 원본 인사관리시스템에서 관리되므로 백업에 포함되지만 참고용입니다.
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">ℹ️ 시스템 정보</div>
+                <div id="systemInfo"></div>
+            </div>
+        </div>
+
+    </div>
+    
+    <!-- ===== 모달 ===== -->
+    <!-- 공휴일 추가 모달 -->
+    <div id="holidayModal" class="modal-overlay">
+        <div class="modal" style="max-width:400px;">
+            <div class="modal-header">
+                <h3>📅 공휴일 추가</h3>
+                <button class="modal-close" onclick="closeHolidayModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>날짜 *</label>
+                    <input type="date" id="newHolidayDate" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>공휴일명 *</label>
+                    <input type="text" id="newHolidayName" class="form-control" placeholder="예: 설날, 추석 연휴">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeHolidayModal()">취소</button>
+                <button class="btn btn-primary" onclick="saveNewHoliday()">추가</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 기록 추가/수정 모달 -->
+    <div id="recordModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="modalTitle">📝 시간외근무 등록</h3>
+                <button class="modal-close" onclick="closeRecordModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>근무일자 *</label>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <input type="date" id="recordDate" class="form-control" style="width:160px;" onchange="onRecordDateChange()">
+                        <span id="recordDateDay" class="badge" style="font-size:14px;padding:6px 12px;"></span>
+                    </div>
+                </div>
+                
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;">
+                    <div class="form-group">
+                        <label>근무구분 *</label>
+                        <select id="recordDayType" class="form-control" onchange="onDayTypeChange()">
+                            <option value="morning">조근 (오전~오후)</option>
+                            <option value="night">야근 (저녁~야간)</option>
+                            <option value="holiday">휴일</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>시간외근무 유형 *</label>
+                        <select id="recordOvertimeType" class="form-control"></select>
+                    </div>
+                </div>
+                
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;">
+                    <div class="form-group">
+                        <label>신청 시작시간 * <small style="color:#6b7280;">(예: 600, 1800)</small></label>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <input type="text" id="recordRequestStart" class="simple-time-input" 
+                                   placeholder="800" maxlength="4"
+                                   oninput="onTimeInput(this)" onblur="formatTimeInput(this)">
+                            <span class="time-display" id="requestStartDisplay"></span>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>신청 종료시간 * <small style="color:#6b7280;">(예: 900, 2100)</small></label>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <input type="text" id="recordRequestEnd" class="simple-time-input" 
+                                   placeholder="2100" maxlength="4"
+                                   oninput="onTimeInput(this)" onblur="formatTimeInput(this)">
+                            <span class="time-display" id="requestEndDisplay"></span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;">
+                    <div class="form-group">
+                        <label>실제 출근시간 <small style="color:#6b7280;">(미입력시 신청시간 적용)</small></label>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <input type="text" id="recordActualStart" class="simple-time-input" 
+                                   placeholder="" maxlength="4"
+                                   oninput="onTimeInput(this)" onblur="formatTimeInput(this)">
+                            <span class="time-display" id="actualStartDisplay"></span>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>실제 퇴근시간 <small style="color:#6b7280;">(미입력시 신청시간 적용)</small></label>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <input type="text" id="recordActualEnd" class="simple-time-input" 
+                                   placeholder="" maxlength="4"
+                                   oninput="onTimeInput(this)" onblur="formatTimeInput(this)">
+                            <span class="time-display" id="actualEndDisplay"></span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>보상방식 *</label>
+                    <select id="recordCompensationType" class="form-control">
+                        <option value="pay">수당 지급</option>
+                        <option value="leave">대휴 적립</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>비고</label>
+                    <input type="text" id="recordNote" class="form-control" placeholder="사유 또는 메모">
+                </div>
+                
+                <!-- 인정시간 계산 결과 -->
+                <div id="recognizedTimeResult" class="alert alert-success" style="display:none;">
+                    <span>✅</span>
+                    <span>인정시간: <strong id="recognizedTimeValue">0</strong>시간 <small id="recognizedTimeDetail"></small></span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeRecordModal()">취소</button>
+                <button class="btn btn-primary" onclick="saveRecord()">저장</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ===== JavaScript 로드 ===== -->
+    
+    <!-- 1. 핵심 모듈 (순서 중요!) -->
+    <script src="js/core/상수_시간외.js"></script>
+    <script src="js/core/데이터베이스_시간외.js"></script>
+    <script src="js/core/유틸_시간외.js"></script>
+    <script src="js/core/공휴일_시간외.js"></script>
+    <script src="js/core/설정_시간외.js"></script>
+    <script src="js/core/급여계산_시간외.js"></script>
+    <script src="js/core/탭관리_시간외.js"></script>
+    
+    <!-- 2. 탭 기능 모듈 -->
+    <script src="js/tabs/주월간현황_시간외.js"></script>
+    <script src="js/tabs/월간집계_시간외.js"></script>
+    <script src="js/tabs/상세보고서_시간외.js"></script>
+    <script src="js/tabs/설정탭_시간외.js"></script>
+    <script src="js/tabs/근태관리_시간외.js"></script>
+    <script src="js/tabs/백업복원_시간외.js"></script>
+    <script src="js/tabs/시간외달력_시간외.js"></script>
+    <script src="js/tabs/일별입력_시간외.js"></script>
+    
+    <!-- 3. 초기화 (마지막) -->
+    <script src="js/초기화_시간외.js"></script>
+
+</body>
+</html>

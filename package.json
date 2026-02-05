@@ -1,0 +1,54 @@
+{
+  "name": "overtime-system",
+  "productName": "시간외근무관리",
+  "version": "1.0.0",
+  "description": "시간외근무관리 데스크톱 앱",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win",
+    "build:dir": "electron-builder --win --dir"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mangfeel/overtime-system.git"
+  },
+  "author": "mangfeel",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^28.1.0",
+    "electron-builder": "^24.9.1"
+  },
+  "dependencies": {
+    "electron-log": "^5.1.1",
+    "electron-store": "^8.1.0",
+    "electron-updater": "^6.1.7"
+  },
+  "build": {
+    "appId": "com.hr.overtime",
+    "productName": "시간외근무관리",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!dist/**",
+      "!node_modules/.cache/**"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": ["ko"],
+      "shortcutName": "시간외근무관리"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "mangfeel",
+      "repo": "overtime-system"
+    }
+  }
+}
