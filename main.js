@@ -264,7 +264,12 @@ autoUpdater.logger = require('electron-log');
 autoUpdater.logger.transports.file.level = 'info';
 
 // Private 저장소 인증 토큰
-process.env.GH_TOKEN = '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';
+const GH_TOKEN = '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';
+process.env.GH_TOKEN = GH_TOKEN;
+
+autoUpdater.requestHeaders = {
+    Authorization: `token ${GH_TOKEN}`
+};
 
 // 자동 다운로드 비활성화 (사용자 확인 후 다운로드)
 autoUpdater.autoDownload = false;
