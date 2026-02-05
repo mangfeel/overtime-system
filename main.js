@@ -1,157 +1,142 @@
 /**
- * main.js - Electron 메인 프로세스
+ * main.js - Electron 메인 ?�로?�스
  * 
- * 시간외근무관리 데스크톱 앱의 메인 프로세스
- * - 앱 윈도우 생성 및 관리
- * - IPC 통신 핸들러
- * - electron-store 기반 자체 데이터 저장
- * - 인사관리 앱 데이터 읽기 전용 접근
- * - 자동 업데이트
- * - .hrm 암호화 백업/복원
- * - 인사관리 앱 라이선스 검증 (v1.2.0)
+ * ?�간?�근무�?�??�스?�톱 ?�의 메인 ?�로?�스
+ * - ???�도???�성 �?관�? * - IPC ?�신 ?�들?? * - electron-store 기반 ?�체 ?�이???�?? * - ?�사관�????�이???�기 ?�용 ?�근
+ * - ?�동 ?�데?�트
+ * - .hrm ?�호??백업/복원
+ * - ?�사관�????�이?�스 검�?(v1.2.0)
  * 
  * @version 1.2.0
  * @since 2026-02-05
  * 
- * [변경 이력]
- * v1.2.0 (2026-02-06) - 라이선스 검증 시스템 추가
- *   - check-hr-license IPC 핸들러: 인사앱 electron-store에서 라이선스 확인
- *   - 라이선스 만료일 검증
- *   - 캐시 유효 시간(24시간) 검증
+ * [변�??�력]
+ * v1.2.0 (2026-02-06) - ?�이?�스 검�??�스??추�?
+ *   - check-hr-license IPC ?�들?? ?�사??electron-store?�서 ?�이?�스 ?�인
+ *   - ?�이?�스 만료??검�? *   - 캐시 ?�효 ?�간(24?�간) 검�? * 
+ * v1.1.0 (2026-02-05) - .hrm ?�호??백업 ?�입
+ *   - AES-256-CBC ?�호??백업/복원 IPC ?�들??추�?
+ *   - backup-save-hrm: ?�이???�호?????�???�이?�로�???.hrm ?�일 ?�?? *   - backup-load-hrm: ?�기 ?�이?�로�???.hrm/.json ?�일 ?�기 ??복호?? *   - .json ?�위 ?�환 (복원 ??.json ?�문 ?�일??지??
  * 
- * v1.1.0 (2026-02-05) - .hrm 암호화 백업 도입
- *   - AES-256-CBC 암호화 백업/복원 IPC 핸들러 추가
- *   - backup-save-hrm: 데이터 암호화 → 저장 다이얼로그 → .hrm 파일 저장
- *   - backup-load-hrm: 열기 다이얼로그 → .hrm/.json 파일 읽기 → 복호화
- *   - .json 하위 호환 (복원 시 .json 평문 파일도 지원)
- * 
- * v1.0.0 (2026-02-05) - 초기 릴리즈
- *   - Phase 1: Electron 프로젝트 초기화
- *   - electron-store 기반 자체 데이터 저장
- *   - 인사관리 앱 electron-store 읽기 전용 접근
- *   - 인사앱 설치 확인 및 라이선스 검증
- *   - 자동 업데이트 (GitHub Release 기반)
- *   - 다이얼로그, 파일 시스템, 인쇄 IPC 핸들러
- */
+ * v1.0.0 (2026-02-05) - 초기 릴리�? *   - Phase 1: Electron ?�로?�트 초기?? *   - electron-store 기반 ?�체 ?�이???�?? *   - ?�사관�???electron-store ?�기 ?�용 ?�근
+ *   - ?�사???�치 ?�인 �??�이?�스 검�? *   - ?�동 ?�데?�트 (GitHub Release 기반)
+ *   - ?�이?�로�? ?�일 ?�스?? ?�쇄 IPC ?�들?? */
 
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 
-// ===== electron-store 설정 =====
+// ===== electron-store ?�정 =====
 
 const Store = require('electron-store');
 
 /**
- * 자체 데이터 저장소 (시간외근무 데이터)
- * 데이터는 C:\Users\사용자\AppData\Roaming\overtime-system\overtime-data.json 에 저장됨
+ * ?�체 ?�이???�?�소 (?�간?�근�??�이??
+ * ?�이?�는 C:\Users\?�용??AppData\Roaming\overtime-system\overtime-data.json ???�?�됨
  */
 const store = new Store({
     name: 'overtime-data',
     encryptionKey: 'overtime-system-encryption-key-2026',
     defaults: {
-        // 시간외근무 기록
+        // ?�간?�근�?기록
         hr_overtime_daily: {},
         // 근태 기록
         hr_attendance_records: {},
-        // 공휴일 설정
+        // 공휴???�정
         hr_overtime_holidays: null,
-        // 시간외 유형 설정
+        // ?�간???�형 ?�정
         hr_overtime_settings: null,
-        // 주/월 제한 설정
+        // �????�한 ?�정
         hr_overtime_limits: null
     }
 });
 
-console.log('[Main] 자체 store 경로:', store.path);
+console.log('[Main] ?�체 store 경로:', store.path);
 
 /**
- * 인사관리 앱 데이터 읽기 전용 저장소
- * 경로: C:\Users\사용자\AppData\Roaming\hr-system\hr-system-data.json
- * ⚠️ 읽기 전용 - 절대 쓰기 금지
+ * ?�사관�????�이???�기 ?�용 ?�?�소
+ * 경로: C:\Users\?�용??AppData\Roaming\hr-system\hr-system-data.json
+ * ?�️ ?�기 ?�용 - ?��? ?�기 금�?
  */
 let hrStore = null;
 
 /**
- * 인사관리 앱 store 초기화 (읽기 전용)
- * @returns {boolean} 초기화 성공 여부
+ * ?�사관�???store 초기??(?�기 ?�용)
+ * @returns {boolean} 초기???�공 ?��?
  */
 function initHRStore() {
     try {
-        // 인사관리 앱 데이터 경로 확인
+        // ?�사관�????�이??경로 ?�인
         const hrUserData = path.join(app.getPath('appData'), 'hr-system');
         const hrDataFile = path.join(hrUserData, 'hr-system-data.json');
         
         if (!fs.existsSync(hrDataFile)) {
-            console.warn('[Main] 인사관리 앱 데이터 파일 없음:', hrDataFile);
+            console.warn('[Main] ?�사관�????�이???�일 ?�음:', hrDataFile);
             return false;
         }
         
-        // 인사관리 앱과 동일한 설정으로 Store 열기 (읽기용)
+        // ?�사관�??�과 ?�일???�정?�로 Store ?�기 (?�기??
         hrStore = new Store({
             name: 'hr-system-data',
-            cwd: hrUserData,                    // 인사관리 앱 데이터 경로 지정
-            encryptionKey: 'hr-system-encryption-key-2026',  // 동일 암호화 키
-            watch: true                          // 파일 변경 감지
+            cwd: hrUserData,                    // ?�사관�????�이??경로 지??            encryptionKey: 'hr-system-encryption-key-2026',  // ?�일 ?�호????            watch: true                          // ?�일 변�?감�?
         });
         
-        console.log('[Main] 인사관리 앱 store 연결 성공:', hrDataFile);
+        console.log('[Main] ?�사관�???store ?�결 ?�공:', hrDataFile);
         return true;
         
     } catch (error) {
-        console.error('[Main] 인사관리 앱 store 연결 실패:', error.message);
+        console.error('[Main] ?�사관�???store ?�결 ?�패:', error.message);
         hrStore = null;
         return false;
     }
 }
 
-// ===== 라이선스 검증 설정 (v1.2.0) =====
+// ===== ?�이?�스 검�??�정 (v1.2.0) =====
 
-/** 라이선스 캐시 유효 시간 (시간) */
+/** ?�이?�스 캐시 ?�효 ?�간 (?�간) */
 const LICENSE_CACHE_HOURS = 24;
 
 /**
- * ★ v1.2.0: 인사관리 앱의 라이선스 정보 확인
- * electron-store에서 hr_license_info 키를 읽어 검증
- * @returns {Object} { valid, status, message, license? }
+ * ??v1.2.0: ?�사관�??�의 ?�이?�스 ?�보 ?�인
+ * electron-store?�서 hr_license_info ?��? ?�어 검�? * @returns {Object} { valid, status, message, license? }
  */
 function checkHRLicense() {
     try {
-        // 1. hrStore 연결 확인
+        // 1. hrStore ?�결 ?�인
         if (!hrStore) {
             if (!initHRStore()) {
                 return {
                     valid: false,
                     status: 'no_hr_app',
-                    message: '인사관리 앱 데이터에 접근할 수 없습니다.'
+                    message: '?�사관�????�이?�에 ?�근?????�습?�다.'
                 };
             }
         }
         
-        // 2. electron-store에서 라이선스 정보 읽기
+        // 2. electron-store?�서 ?�이?�스 ?�보 ?�기
         const licenseInfo = hrStore.get('hr_license_info');
         
         if (!licenseInfo) {
-            console.log('[Main] 인사앱 라이선스 정보 없음 (electron-store)');
+            console.log('[Main] ?�사???�이?�스 ?�보 ?�음 (electron-store)');
             return {
                 valid: false,
                 status: 'not_found',
-                message: '인사관리 시스템에 등록된 라이선스가 없습니다.\n인사관리 시스템에서 라이선스를 먼저 활성화하세요.'
+                message: '?�사관�??�스?�에 ?�록???�이?�스가 ?�습?�다.\n?�사관�??�스?�에???�이?�스�?먼�? ?�성?�하?�요.'
             };
         }
         
-        // 3. 유효성 확인
+        // 3. ?�효???�인
         if (!licenseInfo.valid) {
             return {
                 valid: false,
                 status: 'invalid',
-                message: '인사관리 시스템의 라이선스가 유효하지 않습니다.',
+                message: '?�사관�??�스?�의 ?�이?�스가 ?�효?��? ?�습?�다.',
                 license: licenseInfo
             };
         }
         
-        // 4. 만료일 확인
+        // 4. 만료???�인
         if (licenseInfo.expire_date) {
             const expireDate = new Date(licenseInfo.expire_date);
             const today = new Date();
@@ -161,26 +146,26 @@ function checkHRLicense() {
                 return {
                     valid: false,
                     status: 'expired',
-                    message: `라이선스가 만료되었습니다. (만료일: ${licenseInfo.expire_date})\n인사관리 시스템에서 라이선스를 갱신하세요.`,
+                    message: `?�이?�스가 만료?�었?�니?? (만료?? ${licenseInfo.expire_date})\n?�사관�??�스?�에???�이?�스�?갱신?�세??`,
                     license: licenseInfo
                 };
             }
         }
         
-        // 5. 캐시 시간 확인 (24시간 이내 검증된 것인지)
+        // 5. 캐시 ?�간 ?�인 (24?�간 ?�내 검증된 것인지)
         if (licenseInfo.cached_at) {
             const cachedTime = new Date(licenseInfo.cached_at).getTime();
             const now = Date.now();
             const hoursPassed = (now - cachedTime) / (1000 * 60 * 60);
             
             if (hoursPassed > LICENSE_CACHE_HOURS) {
-                // 캐시 만료 - 하지만 만료일이 아직 남았으면 허용 (오프라인 대비)
-                console.log('[Main] 라이선스 캐시 만료 (' + Math.round(hoursPassed) + '시간 경과), 만료일 기준 허용');
+                // 캐시 만료 - ?��?�?만료?�이 ?�직 ?�았?�면 ?�용 (?�프?�인 ?��?
+                console.log('[Main] ?�이?�스 캐시 만료 (' + Math.round(hoursPassed) + '?�간 경과), 만료??기�? ?�용');
             }
         }
         
-        // 6. 유효한 라이선스
-        console.log('[Main] 라이선스 확인 성공:', {
+        // 6. ?�효???�이?�스
+        console.log('[Main] ?�이?�스 ?�인 ?�공:', {
             status: licenseInfo.status,
             plan: licenseInfo.plan_type,
             expire: licenseInfo.expire_date,
@@ -190,7 +175,7 @@ function checkHRLicense() {
         return {
             valid: true,
             status: 'active',
-            message: '라이선스가 유효합니다.',
+            message: '?�이?�스가 ?�효?�니??',
             license: {
                 plan_type: licenseInfo.plan_type,
                 expire_date: licenseInfo.expire_date,
@@ -200,25 +185,25 @@ function checkHRLicense() {
         };
         
     } catch (error) {
-        console.error('[Main] 라이선스 확인 오류:', error);
+        console.error('[Main] ?�이?�스 ?�인 ?�류:', error);
         return {
             valid: false,
             status: 'error',
-            message: '라이선스 확인 중 오류가 발생했습니다: ' + error.message
+            message: '?�이?�스 ?�인 �??�류가 발생?�습?�다: ' + error.message
         };
     }
 }
 
-// ===== .hrm 암호화 백업 설정 =====
+// ===== .hrm ?�호??백업 ?�정 =====
 
-/** 백업 파일 암호화 키 (AES-256-CBC) */
+/** 백업 ?�일 ?�호????(AES-256-CBC) */
 const BACKUP_ENCRYPTION_KEY = 'overtime-backup-encryption-2026';
 const BACKUP_ALGORITHM = 'aes-256-cbc';
 
 /**
- * 데이터 암호화 (AES-256-CBC)
- * @param {string} plainText - 암호화할 평문 (JSON 문자열)
- * @returns {string} 암호화된 문자열 (iv:encrypted 형식)
+ * ?�이???�호??(AES-256-CBC)
+ * @param {string} plainText - ?�호?�할 ?�문 (JSON 문자??
+ * @returns {string} ?�호?�된 문자??(iv:encrypted ?�식)
  */
 function encryptBackup(plainText) {
     const key = crypto.scryptSync(BACKUP_ENCRYPTION_KEY, 'overtime-salt', 32);
@@ -226,26 +211,24 @@ function encryptBackup(plainText) {
     const cipher = crypto.createCipheriv(BACKUP_ALGORITHM, key, iv);
     let encrypted = cipher.update(plainText, 'utf8', 'hex');
     encrypted += cipher.final('hex');
-    // 헤더 + IV + 암호문 결합
+    // ?�더 + IV + ?�호�?결합
     return 'OTHRM1' + iv.toString('hex') + ':' + encrypted;
 }
 
 /**
- * 데이터 복호화 (AES-256-CBC)
- * @param {string} encryptedText - 암호화된 문자열
- * @returns {string} 복호화된 평문 (JSON 문자열)
- * @throws {Error} 복호화 실패 시
- */
+ * ?�이??복호??(AES-256-CBC)
+ * @param {string} encryptedText - ?�호?�된 문자?? * @returns {string} 복호?�된 ?�문 (JSON 문자??
+ * @throws {Error} 복호???�패 ?? */
 function decryptBackup(encryptedText) {
-    // 헤더 확인
+    // ?�더 ?�인
     if (!encryptedText.startsWith('OTHRM1')) {
-        throw new Error('유효하지 않은 .hrm 파일 형식입니다.');
+        throw new Error('?�효?��? ?��? .hrm ?�일 ?�식?�니??');
     }
-    const data = encryptedText.substring(6); // 'OTHRM1' 제거
+    const data = encryptedText.substring(6); // 'OTHRM1' ?�거
     const key = crypto.scryptSync(BACKUP_ENCRYPTION_KEY, 'overtime-salt', 32);
     const separatorIndex = data.indexOf(':');
     if (separatorIndex === -1) {
-        throw new Error('암호화 데이터 구조가 올바르지 않습니다.');
+        throw new Error('?�호???�이??구조가 ?�바르�? ?�습?�다.');
     }
     const iv = Buffer.from(data.substring(0, separatorIndex), 'hex');
     const encrypted = data.substring(separatorIndex + 1);
@@ -255,50 +238,50 @@ function decryptBackup(encryptedText) {
     return decrypted;
 }
 
-// ===== 자동 업데이트 설정 =====
+// ===== ?�동 ?�데?�트 ?�정 =====
 
 const { autoUpdater } = require('electron-updater');
 
-// 업데이트 로그 설정
+// ?�데?�트 로그 ?�정
 autoUpdater.logger = require('electron-log');
 autoUpdater.logger.transports.file.level = 'info';
 
-// Private 저장소 인증 — setFeedURL 방식 (확실한 인증)
+// Private ?�?�소 ?�증 ??setFeedURL 방식 (?�실???�증)
 autoUpdater.setFeedURL({
     provider: 'github',
     owner: 'mangfeel',
     repo: 'overtime-system',
     private: true,
-    token: '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'
+    token: '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'
 });
 
-// 자동 다운로드 비활성화 (사용자 확인 후 다운로드)
+// ?�동 ?�운로드 비활?�화 (?�용???�인 ???�운로드)
 autoUpdater.autoDownload = false;
 
-// 자동 설치 비활성화 (사용자 확인 후 설치)
+// ?�동 ?�치 비활?�화 (?�용???�인 ???�치)
 autoUpdater.autoInstallOnAppQuit = true;
 
-// ===== 전역 변수 =====
+// ===== ?�역 변??=====
 
-/** @type {BrowserWindow} 메인 윈도우 */
+/** @type {BrowserWindow} 메인 ?�도??*/
 let mainWindow = null;
 
-/** @type {BrowserWindow} 업데이트 진행률 윈도우 */
+/** @type {BrowserWindow} ?�데?�트 진행�??�도??*/
 let progressWindow = null;
 
-/** @type {boolean} 개발 모드 여부 */
+/** @type {boolean} 개발 모드 ?��? */
 const isDev = !app.isPackaged;
 
-/** @type {Object} 업데이트 정보 */
+/** @type {Object} ?�데?�트 ?�보 */
 let updateInfo = null;
 
-/** @type {string[]} 임시 파일 경로 목록 (앱 종료 시 삭제) */
+/** @type {string[]} ?�시 ?�일 경로 목록 (??종료 ????��) */
 let tempFiles = [];
 
-// ===== 윈도우 생성 =====
+// ===== ?�도???�성 =====
 
 /**
- * 메인 윈도우 생성
+ * 메인 ?�도???�성
  */
 function createWindow() {
     mainWindow = new BrowserWindow({
@@ -306,7 +289,7 @@ function createWindow() {
         height: 900,
         minWidth: 1200,
         minHeight: 700,
-        title: '시간외근무관리',
+        title: '?�간?�근무�?�?,
         icon: path.join(__dirname, 'assets', 'icon.ico'),
         webPreferences: {
             nodeIntegration: false,
@@ -319,10 +302,10 @@ function createWindow() {
         show: false
     });
 
-    // 메인 페이지 로드 (로그인 없이 바로 진입)
-    mainWindow.loadFile('메인_시간외.html');
+    // 메인 ?�이지 로드 (로그???�이 바로 진입)
+    mainWindow.loadFile('메인_?�간??html');
 
-    // 준비 완료 후 표시
+    // 준�??�료 ???�시
     mainWindow.once('ready-to-show', () => {
         mainWindow.show();
         
@@ -330,7 +313,7 @@ function createWindow() {
             mainWindow.webContents.openDevTools();
         }
         
-        // 프로덕션 모드에서만 업데이트 확인
+        // ?�로?�션 모드?�서�??�데?�트 ?�인
         if (!isDev) {
             setTimeout(() => {
                 checkForUpdates();
@@ -342,7 +325,7 @@ function createWindow() {
         mainWindow = null;
     });
 
-    // 외부 링크 보안
+    // ?��? 링크 보안
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
         if (url.startsWith('http://') || url.startsWith('https://')) {
             require('electron').shell.openExternal(url);
@@ -351,13 +334,13 @@ function createWindow() {
         return { action: 'allow' };
     });
 
-    console.log('[Main] 윈도우 생성 완료');
+    console.log('[Main] ?�도???�성 ?�료');
 }
 
-// ===== 자동 업데이트 함수 =====
+// ===== ?�동 ?�데?�트 ?�수 =====
 
 /**
- * 업데이트 진행률 윈도우 생성
+ * ?�데?�트 진행�??�도???�성
  */
 function createProgressWindow() {
     if (progressWindow && !progressWindow.isDestroyed()) {
@@ -429,7 +412,7 @@ function createProgressWindow() {
         </style>
     </head>
     <body>
-        <div class="title">🔄 업데이트 다운로드 중...</div>
+        <div class="title">?�� ?�데?�트 ?�운로드 �?..</div>
         <div class="progress-container">
             <div class="progress-bar" id="progressBar"></div>
         </div>
@@ -452,11 +435,11 @@ function createProgressWindow() {
         progressWindow = null;
     });
     
-    console.log('[Updater] 진행률 윈도우 생성');
+    console.log('[Updater] 진행�??�도???�성');
 }
 
 /**
- * 업데이트 진행률 윈도우 닫기
+ * ?�데?�트 진행�??�도???�기
  */
 function closeProgressWindow() {
     if (progressWindow && !progressWindow.isDestroyed()) {
@@ -469,17 +452,17 @@ function closeProgressWindow() {
 }
 
 /**
- * 업데이트 확인
+ * ?�데?�트 ?�인
  */
 function checkForUpdates() {
-    console.log('[Updater] 업데이트 확인 시작...');
+    console.log('[Updater] ?�데?�트 ?�인 ?�작...');
     autoUpdater.checkForUpdates().catch(err => {
-        console.error('[Updater] 업데이트 확인 오류:', err);
+        console.error('[Updater] ?�데?�트 ?�인 ?�류:', err);
     });
 }
 
 /**
- * 렌더러에 업데이트 상태 전송
+ * ?�더?�에 ?�데?�트 ?�태 ?�송
  */
 function sendUpdateStatus(status, data = null) {
     if (mainWindow && mainWindow.webContents) {
@@ -487,23 +470,22 @@ function sendUpdateStatus(status, data = null) {
     }
 }
 
-// 업데이트 이벤트 핸들러
-autoUpdater.on('checking-for-update', () => {
-    console.log('[Updater] 업데이트 확인 중...');
+// ?�데?�트 ?�벤???�들??autoUpdater.on('checking-for-update', () => {
+    console.log('[Updater] ?�데?�트 ?�인 �?..');
     sendUpdateStatus('checking');
 });
 
 autoUpdater.on('update-available', (info) => {
-    console.log('[Updater] 업데이트 발견:', info.version);
+    console.log('[Updater] ?�데?�트 발견:', info.version);
     updateInfo = info;
     sendUpdateStatus('available', info);
     
     dialog.showMessageBox(mainWindow, {
         type: 'info',
-        title: '업데이트 알림',
-        message: `새 버전이 있습니다! (v${info.version})`,
-        detail: '지금 다운로드하시겠습니까?',
-        buttons: ['다운로드', '나중에'],
+        title: '?�데?�트 ?�림',
+        message: `??버전???�습?�다! (v${info.version})`,
+        detail: '지�??�운로드?�시겠습?�까?',
+        buttons: ['?�운로드', '?�중??],
         defaultId: 0
     }).then(result => {
         if (result.response === 0) {
@@ -514,7 +496,7 @@ autoUpdater.on('update-available', (info) => {
 });
 
 autoUpdater.on('update-not-available', (info) => {
-    console.log('[Updater] 최신 버전입니다:', info.version);
+    console.log('[Updater] 최신 버전?�니??', info.version);
     sendUpdateStatus('not-available', info);
 });
 
@@ -523,31 +505,30 @@ autoUpdater.on('download-progress', (progress) => {
     const mbDownloaded = (progress.transferred / 1024 / 1024).toFixed(1);
     const mbTotal = (progress.total / 1024 / 1024).toFixed(1);
     
-    console.log(`[Updater] 다운로드 진행: ${percent}%`);
+    console.log(`[Updater] ?�운로드 진행: ${percent}%`);
     sendUpdateStatus('downloading', { percent, mbDownloaded, mbTotal });
     
-    // 작업표시줄 진행률
-    if (mainWindow) {
+    // ?�업?�시�?진행�?    if (mainWindow) {
         mainWindow.setProgressBar(progress.percent / 100);
     }
     
-    // 진행률 윈도우 업데이트
+    // 진행�??�도???�데?�트
     if (progressWindow && !progressWindow.isDestroyed()) {
         progressWindow.webContents.send('update-progress', { percent, mbDownloaded, mbTotal });
     }
 });
 
 autoUpdater.on('update-downloaded', (info) => {
-    console.log('[Updater] 다운로드 완료:', info.version);
+    console.log('[Updater] ?�운로드 ?�료:', info.version);
     sendUpdateStatus('downloaded', info);
     closeProgressWindow();
     
     dialog.showMessageBox(mainWindow, {
         type: 'info',
-        title: '업데이트 준비 완료',
-        message: `v${info.version} 다운로드가 완료되었습니다.`,
-        detail: '지금 재시작하여 업데이트를 적용하시겠습니까?',
-        buttons: ['재시작', '나중에'],
+        title: '?�데?�트 준�??�료',
+        message: `v${info.version} ?�운로드가 ?�료?�었?�니??`,
+        detail: '지�??�시?�하???�데?�트�??�용?�시겠습?�까?',
+        buttons: ['?�시??, '?�중??],
         defaultId: 0
     }).then(result => {
         if (result.response === 0) {
@@ -557,18 +538,18 @@ autoUpdater.on('update-downloaded', (info) => {
 });
 
 autoUpdater.on('error', (error) => {
-    console.error('[Updater] 오류:', error);
+    console.error('[Updater] ?�류:', error);
     sendUpdateStatus('error', { message: error.message });
     closeProgressWindow();
 });
 
-// ===== 앱 라이프사이클 =====
+// ===== ???�이?�사?�클 =====
 
 app.whenReady().then(() => {
-    // 인사관리 앱 store 연결 시도
+    // ?�사관�???store ?�결 ?�도
     initHRStore();
     
-    // 윈도우 생성
+    // ?�도???�성
     createWindow();
     
     app.on('activate', () => {
@@ -584,33 +565,33 @@ app.on('window-all-closed', () => {
     }
 });
 
-// 앱 종료 전 임시 파일 정리
+// ??종료 ???�시 ?�일 ?�리
 app.on('before-quit', () => {
-    console.log('[Main] 앱 종료 - 임시 파일 정리 시작');
+    console.log('[Main] ??종료 - ?�시 ?�일 ?�리 ?�작');
     
     tempFiles.forEach(filePath => {
         try {
             if (fs.existsSync(filePath)) {
                 fs.unlinkSync(filePath);
-                console.log('[Main] 임시 파일 삭제:', filePath);
+                console.log('[Main] ?�시 ?�일 ??��:', filePath);
             }
         } catch (err) {
-            console.warn('[Main] 임시 파일 삭제 실패:', filePath, err.message);
+            console.warn('[Main] ?�시 ?�일 ??�� ?�패:', filePath, err.message);
         }
     });
     
     tempFiles = [];
-    console.log('[Main] 임시 파일 정리 완료');
+    console.log('[Main] ?�시 ?�일 ?�리 ?�료');
 });
 
-// ===== IPC 핸들러: 자동 업데이트 =====
+// ===== IPC ?�들?? ?�동 ?�데?�트 =====
 
 ipcMain.handle('check-for-updates', () => {
     if (isDev) {
-        return { success: false, message: '개발 모드에서는 업데이트를 확인할 수 없습니다.' };
+        return { success: false, message: '개발 모드?�서???�데?�트�??�인?????�습?�다.' };
     }
     checkForUpdates();
-    return { success: true, message: '업데이트 확인 중...' };
+    return { success: true, message: '?�데?�트 ?�인 �?..' };
 });
 
 ipcMain.handle('download-update', () => {
@@ -618,7 +599,7 @@ ipcMain.handle('download-update', () => {
         autoUpdater.downloadUpdate();
         return { success: true };
     }
-    return { success: false, message: '다운로드할 업데이트가 없습니다.' };
+    return { success: false, message: '?�운로드???�데?�트가 ?�습?�다.' };
 });
 
 ipcMain.handle('install-update', () => {
@@ -632,7 +613,7 @@ ipcMain.handle('get-app-version', () => {
     };
 });
 
-// ===== IPC 핸들러: 자체 데이터 저장 (electron-store) =====
+// ===== IPC ?�들?? ?�체 ?�이???�??(electron-store) =====
 
 ipcMain.handle('store-set', (event, key, value) => {
     try {
@@ -640,7 +621,7 @@ ipcMain.handle('store-set', (event, key, value) => {
         console.log('[Main] store-set:', key);
         return { success: true };
     } catch (error) {
-        console.error('[Main] store-set 오류:', error);
+        console.error('[Main] store-set ?�류:', error);
         return { success: false, error: error.message };
     }
 });
@@ -648,10 +629,10 @@ ipcMain.handle('store-set', (event, key, value) => {
 ipcMain.handle('store-get', (event, key) => {
     try {
         const value = store.get(key);
-        console.log('[Main] store-get:', key, value ? '(데이터 있음)' : '(데이터 없음)');
+        console.log('[Main] store-get:', key, value ? '(?�이???�음)' : '(?�이???�음)');
         return { success: true, data: value };
     } catch (error) {
-        console.error('[Main] store-get 오류:', error);
+        console.error('[Main] store-get ?�류:', error);
         return { success: false, error: error.message };
     }
 });
@@ -662,7 +643,7 @@ ipcMain.handle('store-delete', (event, key) => {
         console.log('[Main] store-delete:', key);
         return { success: true };
     } catch (error) {
-        console.error('[Main] store-delete 오류:', error);
+        console.error('[Main] store-delete ?�류:', error);
         return { success: false, error: error.message };
     }
 });
@@ -670,10 +651,10 @@ ipcMain.handle('store-delete', (event, key) => {
 ipcMain.handle('store-get-all', (event) => {
     try {
         const allData = store.store;
-        console.log('[Main] store-get-all: 전체 데이터 조회');
+        console.log('[Main] store-get-all: ?�체 ?�이??조회');
         return { success: true, data: allData };
     } catch (error) {
-        console.error('[Main] store-get-all 오류:', error);
+        console.error('[Main] store-get-all ?�류:', error);
         return { success: false, error: error.message };
     }
 });
@@ -681,10 +662,10 @@ ipcMain.handle('store-get-all', (event) => {
 ipcMain.handle('store-clear', (event) => {
     try {
         store.clear();
-        console.log('[Main] store-clear: 전체 데이터 초기화');
+        console.log('[Main] store-clear: ?�체 ?�이??초기??);
         return { success: true };
     } catch (error) {
-        console.error('[Main] store-clear 오류:', error);
+        console.error('[Main] store-clear ?�류:', error);
         return { success: false, error: error.message };
     }
 });
@@ -697,10 +678,10 @@ ipcMain.handle('store-get-path', (event) => {
     };
 });
 
-// ===== IPC 핸들러: 인사관리 앱 데이터 읽기 (읽기 전용) =====
+// ===== IPC ?�들?? ?�사관�????�이???�기 (?�기 ?�용) =====
 
 /**
- * 인사관리 앱 설치 확인
+ * ?�사관�????�치 ?�인
  * @returns {Object} { installed, dataPath, hasData }
  */
 ipcMain.handle('check-hr-app', () => {
@@ -709,8 +690,7 @@ ipcMain.handle('check-hr-app', () => {
         const hrDataFile = path.join(hrUserData, 'hr-system-data.json');
         const installed = fs.existsSync(hrDataFile);
         
-        // store 미초기화 시 재시도
-        if (installed && !hrStore) {
+        // store 미초기화 ???�시??        if (installed && !hrStore) {
             initHRStore();
         }
         
@@ -720,11 +700,11 @@ ipcMain.handle('check-hr-app', () => {
                 const dbData = hrStore.get('hr_system_v25_db');
                 hasData = dbData && dbData.employees && dbData.employees.length > 0;
             } catch (e) {
-                console.warn('[Main] HR 데이터 확인 실패:', e.message);
+                console.warn('[Main] HR ?�이???�인 ?�패:', e.message);
             }
         }
         
-        console.log('[Main] 인사앱 확인:', { installed, hasData });
+        console.log('[Main] ?�사???�인:', { installed, hasData });
         return { 
             success: true, 
             installed, 
@@ -732,64 +712,62 @@ ipcMain.handle('check-hr-app', () => {
             hasData 
         };
     } catch (error) {
-        console.error('[Main] 인사앱 확인 오류:', error);
+        console.error('[Main] ?�사???�인 ?�류:', error);
         return { success: false, installed: false, hasData: false, error: error.message };
     }
 });
 
 /**
- * ★ v1.2.0: 인사관리 앱 라이선스 확인
- * HR 앱의 electron-store에서 라이선스 정보를 읽어 검증
- * @returns {Object} { valid, status, message, license? }
+ * ??v1.2.0: ?�사관�????�이?�스 ?�인
+ * HR ?�의 electron-store?�서 ?�이?�스 ?�보�??�어 검�? * @returns {Object} { valid, status, message, license? }
  */
 ipcMain.handle('check-hr-license', () => {
     return checkHRLicense();
 });
 
 /**
- * 인사관리 앱 데이터 읽기 (읽기 전용)
- * @param {string} key - 읽을 데이터 키
- * @returns {Object} { success, data }
+ * ?�사관�????�이???�기 (?�기 ?�용)
+ * @param {string} key - ?�을 ?�이???? * @returns {Object} { success, data }
  */
 ipcMain.handle('hr-store-get', (event, key) => {
     try {
         if (!hrStore) {
-            // 재초기화 시도
+            // ?�초기화 ?�도
             if (!initHRStore()) {
-                return { success: false, error: '인사관리 앱 데이터에 접근할 수 없습니다.' };
+                return { success: false, error: '?�사관�????�이?�에 ?�근?????�습?�다.' };
             }
         }
         
         const value = hrStore.get(key);
-        console.log('[Main] hr-store-get:', key, value ? '(데이터 있음)' : '(데이터 없음)');
+        console.log('[Main] hr-store-get:', key, value ? '(?�이???�음)' : '(?�이???�음)');
         return { success: true, data: value };
     } catch (error) {
-        console.error('[Main] hr-store-get 오류:', error);
+        console.error('[Main] hr-store-get ?�류:', error);
         return { success: false, error: error.message };
     }
 });
 
 /**
- * 인사관리 앱 전체 데이터 읽기 (읽기 전용)
+ * ?�사관�????�체 ?�이???�기 (?�기 ?�용)
  */
 ipcMain.handle('hr-store-get-all', (event) => {
     try {
         if (!hrStore) {
             if (!initHRStore()) {
-                return { success: false, error: '인사관리 앱 데이터에 접근할 수 없습니다.' };
+                return { success: false, error: '?�사관�????�이?�에 ?�근?????�습?�다.' };
             }
         }
         
         const allData = hrStore.store;
-        console.log('[Main] hr-store-get-all: 인사 전체 데이터 조회');
+        console.log('[Main] hr-store-get-all: ?�사 ?�체 ?�이??조회');
         return { success: true, data: allData };
     } catch (error) {
-        console.error('[Main] hr-store-get-all 오류:', error);
+        console.error('[Main] hr-store-get-all ?�류:', error);
         return { success: false, error: error.message };
     }
 });
 
-// ===== IPC 핸들러: 앱 정보 =====
+// ===== IPC ?�들?? ???�보 =====
 
 ipcMain.handle('get-app-info', () => {
     return {
@@ -803,22 +781,22 @@ ipcMain.handle('get-app-info', () => {
     };
 });
 
-// ===== IPC 핸들러: 다이얼로그 =====
+// ===== IPC ?�들?? ?�이?�로�?=====
 
 ipcMain.handle('show-message', async (event, options) => {
     const result = await dialog.showMessageBox(mainWindow, {
         type: options.type || 'info',
-        title: options.title || '알림',
+        title: options.title || '?�림',
         message: options.message || '',
         detail: options.detail || '',
-        buttons: options.buttons || ['확인']
+        buttons: options.buttons || ['?�인']
     });
     return result;
 });
 
 ipcMain.handle('show-save-dialog', async (event, options) => {
     const result = await dialog.showSaveDialog(mainWindow, {
-        title: options.title || '저장',
+        title: options.title || '?�??,
         defaultPath: options.defaultPath || '',
         filters: options.filters || [
             { name: 'JSON Files', extensions: ['json'] },
@@ -830,7 +808,7 @@ ipcMain.handle('show-save-dialog', async (event, options) => {
 
 ipcMain.handle('show-open-dialog', async (event, options) => {
     const result = await dialog.showOpenDialog(mainWindow, {
-        title: options.title || '열기',
+        title: options.title || '?�기',
         properties: options.properties || ['openFile'],
         filters: options.filters || [
             { name: 'JSON Files', extensions: ['json'] },
@@ -840,15 +818,15 @@ ipcMain.handle('show-open-dialog', async (event, options) => {
     return result;
 });
 
-// ===== IPC 핸들러: 파일 시스템 =====
+// ===== IPC ?�들?? ?�일 ?�스??=====
 
 ipcMain.handle('write-file', async (event, filePath, data) => {
     try {
         fs.writeFileSync(filePath, data, 'utf8');
-        console.log('[Main] 파일 저장:', filePath);
+        console.log('[Main] ?�일 ?�??', filePath);
         return { success: true };
     } catch (error) {
-        console.error('[Main] 파일 저장 오류:', error);
+        console.error('[Main] ?�일 ?�???�류:', error);
         return { success: false, error: error.message };
     }
 });
@@ -856,10 +834,10 @@ ipcMain.handle('write-file', async (event, filePath, data) => {
 ipcMain.handle('read-file', async (event, filePath) => {
     try {
         const data = fs.readFileSync(filePath, 'utf8');
-        console.log('[Main] 파일 읽기:', filePath);
+        console.log('[Main] ?�일 ?�기:', filePath);
         return { success: true, data: data };
     } catch (error) {
-        console.error('[Main] 파일 읽기 오류:', error);
+        console.error('[Main] ?�일 ?�기 ?�류:', error);
         return { success: false, error: error.message };
     }
 });
@@ -868,7 +846,7 @@ ipcMain.handle('quit-app', () => {
     app.quit();
 });
 
-// ===== IPC 핸들러: 브라우저로 열기 (인쇄) =====
+// ===== IPC ?�들?? 브라?��?�??�기 (?�쇄) =====
 
 ipcMain.handle('open-in-browser', async (event, htmlContent, filename = 'print_temp.html') => {
     try {
@@ -879,43 +857,40 @@ ipcMain.handle('open-in-browser', async (event, htmlContent, filename = 'print_t
         const tempFile = path.join(tempDir, 'ot_print_' + Date.now() + '.html');
         
         fs.writeFileSync(tempFile, htmlContent, 'utf8');
-        console.log('[Main] 임시 파일 생성:', tempFile);
+        console.log('[Main] ?�시 ?�일 ?�성:', tempFile);
         
         tempFiles.push(tempFile);
         
         const result = await shell.openPath(tempFile);
         
         if (result) {
-            console.error('[Main] 브라우저 열기 오류:', result);
+            console.error('[Main] 브라?��? ?�기 ?�류:', result);
             return { success: false, error: result };
         }
         
-        console.log('[Main] 브라우저로 열기 완료');
+        console.log('[Main] 브라?��?�??�기 ?�료');
         return { success: true, path: tempFile };
     } catch (error) {
-        console.error('[Main] 브라우저로 열기 오류:', error);
+        console.error('[Main] 브라?��?�??�기 ?�류:', error);
         return { success: false, error: error.message };
     }
 });
 
-// ===== IPC 핸들러: .hrm 암호화 백업/복원 =====
+// ===== IPC ?�들?? .hrm ?�호??백업/복원 =====
 
 /**
- * 백업 저장 (.hrm 암호화)
- * 렌더러에서 JSON 데이터를 받아 암호화 후 파일로 저장
- * @param {string} jsonData - 백업할 JSON 문자열
- * @param {string} defaultFilename - 기본 파일명
- * @returns {Object} { success, filePath?, error? }
+ * 백업 ?�??(.hrm ?�호??
+ * ?�더?�에??JSON ?�이?��? 받아 ?�호?????�일�??�?? * @param {string} jsonData - 백업??JSON 문자?? * @param {string} defaultFilename - 기본 ?�일�? * @returns {Object} { success, filePath?, error? }
  */
 ipcMain.handle('backup-save-hrm', async (event, jsonData, defaultFilename) => {
     try {
-        // 1. 저장 다이얼로그 표시
+        // 1. ?�???�이?�로�??�시
         const result = await dialog.showSaveDialog(mainWindow, {
-            title: '백업 파일 저장',
-            defaultPath: defaultFilename || '시간외근무_백업.hrm',
+            title: '백업 ?�일 ?�??,
+            defaultPath: defaultFilename || '?�간?�근�?백업.hrm',
             filters: [
-                { name: '시간외근무 백업 파일', extensions: ['hrm'] },
-                { name: '모든 파일', extensions: ['*'] }
+                { name: '?�간?�근�?백업 ?�일', extensions: ['hrm'] },
+                { name: '모든 ?�일', extensions: ['*'] }
             ]
         });
         
@@ -923,37 +898,35 @@ ipcMain.handle('backup-save-hrm', async (event, jsonData, defaultFilename) => {
             return { success: false, canceled: true };
         }
         
-        // 2. 데이터 암호화
-        const encrypted = encryptBackup(jsonData);
+        // 2. ?�이???�호??        const encrypted = encryptBackup(jsonData);
         
-        // 3. 파일 저장
-        fs.writeFileSync(result.filePath, encrypted, 'utf8');
-        console.log('[Main] .hrm 백업 저장:', result.filePath);
+        // 3. ?�일 ?�??        fs.writeFileSync(result.filePath, encrypted, 'utf8');
+        console.log('[Main] .hrm 백업 ?�??', result.filePath);
         
         return { success: true, filePath: result.filePath };
         
     } catch (error) {
-        console.error('[Main] .hrm 백업 저장 오류:', error);
+        console.error('[Main] .hrm 백업 ?�???�류:', error);
         return { success: false, error: error.message };
     }
 });
 
 /**
- * 백업 복원 (.hrm 암호화 또는 .json 평문)
- * 파일 열기 다이얼로그 → 파일 읽기 → 복호화(필요 시) → JSON 반환
+ * 백업 복원 (.hrm ?�호???�는 .json ?�문)
+ * ?�일 ?�기 ?�이?�로�????�일 ?�기 ??복호???�요 ?? ??JSON 반환
  * @returns {Object} { success, data?, filePath?, fileType?, error? }
  */
 ipcMain.handle('backup-load-hrm', async (event) => {
     try {
-        // 1. 열기 다이얼로그 표시
+        // 1. ?�기 ?�이?�로�??�시
         const result = await dialog.showOpenDialog(mainWindow, {
-            title: '백업 파일 열기',
+            title: '백업 ?�일 ?�기',
             properties: ['openFile'],
             filters: [
-                { name: '백업 파일', extensions: ['hrm', 'json'] },
-                { name: '시간외근무 백업 파일', extensions: ['hrm'] },
-                { name: 'JSON 파일', extensions: ['json'] },
-                { name: '모든 파일', extensions: ['*'] }
+                { name: '백업 ?�일', extensions: ['hrm', 'json'] },
+                { name: '?�간?�근�?백업 ?�일', extensions: ['hrm'] },
+                { name: 'JSON ?�일', extensions: ['json'] },
+                { name: '모든 ?�일', extensions: ['*'] }
             ]
         });
         
@@ -968,43 +941,42 @@ ipcMain.handle('backup-load-hrm', async (event) => {
         let jsonData;
         let fileType;
         
-        // 2. 파일 형식 판별 및 처리
+        // 2. ?�일 ?�식 ?�별 �?처리
         if (ext === '.hrm' || fileContent.startsWith('OTHRM1')) {
-            // .hrm 암호화 파일 → 복호화
-            const decrypted = decryptBackup(fileContent);
+            // .hrm ?�호???�일 ??복호??            const decrypted = decryptBackup(fileContent);
             jsonData = JSON.parse(decrypted);
             fileType = 'hrm';
             console.log('[Main] .hrm 백업 복원:', filePath);
         } else {
-            // .json 평문 파일 (하위 호환)
+            // .json ?�문 ?�일 (?�위 ?�환)
             jsonData = JSON.parse(fileContent);
             fileType = 'json';
-            console.log('[Main] .json 백업 복원 (레거시):', filePath);
+            console.log('[Main] .json 백업 복원 (?�거??:', filePath);
         }
         
         return { success: true, data: jsonData, filePath, fileType };
         
     } catch (error) {
-        console.error('[Main] 백업 복원 오류:', error);
+        console.error('[Main] 백업 복원 ?�류:', error);
         
-        // 복호화 실패 시 친절한 오류 메시지
-        if (error.message.includes('유효하지 않은') || error.message.includes('암호화') || 
+        // 복호???�패 ??친절???�류 메시지
+        if (error.message.includes('?�효?��? ?��?') || error.message.includes('?�호??) || 
             error.message.includes('bad decrypt') || error.message.includes('wrong final block')) {
-            return { success: false, error: '백업 파일이 손상되었거나 다른 시스템에서 생성된 파일입니다.' };
+            return { success: false, error: '백업 ?�일???�상?�었거나 ?�른 ?�스?�에???�성???�일?�니??' };
         }
         
         return { success: false, error: error.message };
     }
 });
 
-// ===== 에러 핸들링 =====
+// ===== ?�러 ?�들�?=====
 
 process.on('uncaughtException', (error) => {
-    console.error('[Main] 예외 발생:', error);
+    console.error('[Main] ?�외 발생:', error);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('[Main] Promise 거부:', reason);
+    console.error('[Main] Promise 거�?:', reason);
 });
 
-console.log('[Main] main.js 로드 완료 (v1.2.0)');
+console.log('[Main] main.js 로드 ?�료 (v1.2.0)');
