@@ -8,11 +8,17 @@
  * - 인사관리 앱 데이터 읽기 전용 접근
  * - 자동 업데이트
  * - .hrm 암호화 백업/복원
+ * - 인사관리 앱 라이선스 검증 (v1.2.0)
  * 
- * @version 1.1.0
+ * @version 1.2.0
  * @since 2026-02-05
  * 
  * [변경 이력]
+ * v1.2.0 (2026-02-06) - 라이선스 검증 시스템 추가
+ *   - check-hr-license IPC 핸들러: 인사앱 electron-store에서 라이선스 확인
+ *   - 라이선스 만료일 검증
+ *   - 캐시 유효 시간(24시간) 검증
+ * 
  * v1.1.0 (2026-02-05) - .hrm 암호화 백업 도입
  *   - AES-256-CBC 암호화 백업/복원 IPC 핸들러 추가
  *   - backup-save-hrm: 데이터 암호화 → 저장 다이얼로그 → .hrm 파일 저장
@@ -97,6 +103,109 @@ function initHRStore() {
         console.error('[Main] 인사관리 앱 store 연결 실패:', error.message);
         hrStore = null;
         return false;
+    }
+}
+
+// ===== 라이선스 검증 설정 (v1.2.0) =====
+
+/** 라이선스 캐시 유효 시간 (시간) */
+const LICENSE_CACHE_HOURS = 24;
+
+/**
+ * ★ v1.2.0: 인사관리 앱의 라이선스 정보 확인
+ * electron-store에서 hr_license_info 키를 읽어 검증
+ * @returns {Object} { valid, status, message, license? }
+ */
+function checkHRLicense() {
+    try {
+        // 1. hrStore 연결 확인
+        if (!hrStore) {
+            if (!initHRStore()) {
+                return {
+                    valid: false,
+                    status: 'no_hr_app',
+                    message: '인사관리 앱 데이터에 접근할 수 없습니다.'
+                };
+            }
+        }
+        
+        // 2. electron-store에서 라이선스 정보 읽기
+        const licenseInfo = hrStore.get('hr_license_info');
+        
+        if (!licenseInfo) {
+            console.log('[Main] 인사앱 라이선스 정보 없음 (electron-store)');
+            return {
+                valid: false,
+                status: 'not_found',
+                message: '인사관리 시스템에 등록된 라이선스가 없습니다.\n인사관리 시스템에서 라이선스를 먼저 활성화하세요.'
+            };
+        }
+        
+        // 3. 유효성 확인
+        if (!licenseInfo.valid) {
+            return {
+                valid: false,
+                status: 'invalid',
+                message: '인사관리 시스템의 라이선스가 유효하지 않습니다.',
+                license: licenseInfo
+            };
+        }
+        
+        // 4. 만료일 확인
+        if (licenseInfo.expire_date) {
+            const expireDate = new Date(licenseInfo.expire_date);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            if (today > expireDate) {
+                return {
+                    valid: false,
+                    status: 'expired',
+                    message: `라이선스가 만료되었습니다. (만료일: ${licenseInfo.expire_date})\n인사관리 시스템에서 라이선스를 갱신하세요.`,
+                    license: licenseInfo
+                };
+            }
+        }
+        
+        // 5. 캐시 시간 확인 (24시간 이내 검증된 것인지)
+        if (licenseInfo.cached_at) {
+            const cachedTime = new Date(licenseInfo.cached_at).getTime();
+            const now = Date.now();
+            const hoursPassed = (now - cachedTime) / (1000 * 60 * 60);
+            
+            if (hoursPassed > LICENSE_CACHE_HOURS) {
+                // 캐시 만료 - 하지만 만료일이 아직 남았으면 허용 (오프라인 대비)
+                console.log('[Main] 라이선스 캐시 만료 (' + Math.round(hoursPassed) + '시간 경과), 만료일 기준 허용');
+            }
+        }
+        
+        // 6. 유효한 라이선스
+        console.log('[Main] 라이선스 확인 성공:', {
+            status: licenseInfo.status,
+            plan: licenseInfo.plan_type,
+            expire: licenseInfo.expire_date,
+            days_remaining: licenseInfo.days_remaining
+        });
+        
+        return {
+            valid: true,
+            status: 'active',
+            message: '라이선스가 유효합니다.',
+            license: {
+                plan_type: licenseInfo.plan_type,
+                expire_date: licenseInfo.expire_date,
+                days_remaining: licenseInfo.days_remaining,
+                cached_at: licenseInfo.cached_at
+            }
+        };
+        
+    } catch (error) {
+        console.error('[Main] 라이선스 확인 오류:', error);
+        return {
+            valid: false,
+            status: 'error',
+            message: '라이선스 확인 중 오류가 발생했습니다: ' + error.message
+        };
     }
 }
 
@@ -620,6 +729,15 @@ ipcMain.handle('check-hr-app', () => {
 });
 
 /**
+ * ★ v1.2.0: 인사관리 앱 라이선스 확인
+ * HR 앱의 electron-store에서 라이선스 정보를 읽어 검증
+ * @returns {Object} { valid, status, message, license? }
+ */
+ipcMain.handle('check-hr-license', () => {
+    return checkHRLicense();
+});
+
+/**
  * 인사관리 앱 데이터 읽기 (읽기 전용)
  * @param {string} key - 읽을 데이터 키
  * @returns {Object} { success, data }
@@ -880,4 +998,4 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error('[Main] Promise 거부:', reason);
 });
 
-console.log('[Main] main.js 로드 완료 (v1.1.0)');
+console.log('[Main] main.js 로드 완료 (v1.2.0)');

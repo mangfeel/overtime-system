@@ -5,11 +5,15 @@
  * - contextBridge를 통해 안전한 API만 노출
  * - Node.js 직접 접근 차단
  * - 인사관리 앱 데이터 읽기 전용 API 제공
+ * - 인사관리 앱 라이선스 검증 API (v1.2.0)
  * 
- * @version 1.1.0
+ * @version 1.2.0
  * @since 2026-02-05
  * 
  * [변경 이력]
+ * v1.2.0 (2026-02-06) - 라이선스 검증 API 추가
+ *   - hrStore.checkLicense: 인사앱 라이선스 유효성 확인
+ * 
  * v1.1.0 (2026-02-05) - .hrm 암호화 백업 API 추가
  *   - saveBackupHrm: 데이터를 암호화하여 .hrm 파일로 저장
  *   - loadBackupHrm: .hrm/.json 파일을 읽어 복호화 후 반환
@@ -212,7 +216,20 @@ contextBridge.exposeInMainWorld('hrStore', {
      * 인사관리 앱 전체 데이터 읽기
      * @returns {Promise<Object>} { success, data }
      */
-    getAll: () => ipcRenderer.invoke('hr-store-get-all')
+    getAll: () => ipcRenderer.invoke('hr-store-get-all'),
+    
+    /**
+     * ★ v1.2.0: 인사관리 앱 라이선스 확인
+     * @returns {Promise<Object>} { valid, status, message, license? }
+     * 
+     * @example
+     * const result = await hrStore.checkLicense();
+     * if (!result.valid) {
+     *     // 차단 처리
+     *     showBlockScreen('라이선스 필요', result.message);
+     * }
+     */
+    checkLicense: () => ipcRenderer.invoke('check-hr-license')
 });
 
 /**
@@ -221,5 +238,6 @@ contextBridge.exposeInMainWorld('hrStore', {
  */
 contextBridge.exposeInMainWorld('isElectron', true);
 
-console.log('[Preload] preload.js 로드 완료 (v1.1.0)');
+console.log('[Preload] preload.js 로드 완료 (v1.2.0)');
 console.log('[Preload] electronAPI, electronStore, hrStore 노출됨');
+console.log('[Preload] hrStore.checkLicense 추가됨 (라이선스 검증)');
