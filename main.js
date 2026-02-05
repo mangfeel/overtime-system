@@ -1,4 +1,4 @@
-﻿/**
+﻿﻿/**
  * main.js - Electron 메인 ?�로?�스
  * 
  * ?�간?�근무�?�??�스?�톱 ?�의 메인 ?�로?�스
@@ -246,14 +246,7 @@ const { autoUpdater } = require('electron-updater');
 autoUpdater.logger = require('electron-log');
 autoUpdater.logger.transports.file.level = 'info';
 
-// Private ?�?�소 ?�증 ??setFeedURL 방식 (?�실???�증)
-autoUpdater.setFeedURL({
-    provider: 'github',
-    owner: 'mangfeel',
-    repo: 'overtime-system',
-    private: true,
-    token: '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'
-});
+// Public 저장소 - 기본 GitHub provider 사용 (토큰 불필요)
 
 // ?�동 ?�운로드 비활?�화 (?�용???�인 ???�운로드)
 autoUpdater.autoDownload = false;
