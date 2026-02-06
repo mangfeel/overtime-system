@@ -1,7 +1,7 @@
 {
   "name": "overtime-system",
   "productName": "시간외근무관리",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "description": "시간외근무관리 데스크탑 앱",
   "main": "main.js",
   "scripts": {

@@ -10,10 +10,15 @@
  * - .hrm 암호화 백업/복원
  * - 인사관리 앱 라이선스 검증 (v1.2.0)
  * 
- * @version 1.2.0
+ * @version 1.2.1
  * @since 2026-02-05
  * 
  * [변경 이력]
+ * v1.2.1 (2026-02-06) - 라이선스 status 필드 검증 추가
+ *   - licenseInfo.status가 'active'가 아니면 차단
+ *   - suspended, expired, pending, cancelled 상태 처리
+ *   - 기존 valid 플래그 + status 필드 이중 검증
+ * 
  * v1.2.0 (2026-02-06) - 라이선스 검증 시스템 추가
  *   - check-hr-license IPC 핸들러: 인사앱 electron-store에서 라이선스 확인
  *   - 라이선스 만료일 검증
@@ -141,7 +146,7 @@ function checkHRLicense() {
             };
         }
         
-        // 3. 유효성 확인
+        // 3. valid 플래그 확인
         if (!licenseInfo.valid) {
             return {
                 valid: false,
@@ -151,7 +156,25 @@ function checkHRLicense() {
             };
         }
         
-        // 4. 만료일 확인
+        // ★ 4. status 필드 확인 (suspended, expired 등)
+        if (licenseInfo.status && licenseInfo.status !== 'active') {
+            const statusMessages = {
+                'suspended': '라이선스가 정지되었습니다.\n관리자에게 문의하세요.',
+                'expired': '라이선스가 만료되었습니다.\n인사관리 시스템에서 라이선스를 갱신하세요.',
+                'pending': '라이선스가 아직 활성화되지 않았습니다.\n인사관리 시스템에서 라이선스를 활성화하세요.',
+                'cancelled': '라이선스가 취소되었습니다.\n관리자에게 문의하세요.'
+            };
+            
+            console.log('[Main] 라이선스 상태 비활성:', licenseInfo.status);
+            return {
+                valid: false,
+                status: licenseInfo.status,
+                message: statusMessages[licenseInfo.status] || `라이선스 상태가 유효하지 않습니다. (${licenseInfo.status})`,
+                license: licenseInfo
+            };
+        }
+        
+        // 5. 만료일 확인
         if (licenseInfo.expire_date) {
             const expireDate = new Date(licenseInfo.expire_date);
             const today = new Date();
@@ -167,7 +190,7 @@ function checkHRLicense() {
             }
         }
         
-        // 5. 캐시 시간 확인 (24시간 이내 검증된 것인지)
+        // 6. 캐시 시간 확인 (24시간 이내 검증된 것인지)
         if (licenseInfo.cached_at) {
             const cachedTime = new Date(licenseInfo.cached_at).getTime();
             const now = Date.now();
@@ -179,7 +202,7 @@ function checkHRLicense() {
             }
         }
         
-        // 6. 유효한 라이선스
+        // 7. 유효한 라이선스
         console.log('[Main] 라이선스 확인 성공:', {
             status: licenseInfo.status,
             plan: licenseInfo.plan_type,
@@ -998,4 +1021,4 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error('[Main] Promise 거부:', reason);
 });
 
-console.log('[Main] main.js 로드 완료 (v1.2.0)');
+console.log('[Main] main.js 로드 완료 (v1.2.1)');

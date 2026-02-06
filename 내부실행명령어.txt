@@ -1,2 +1,4 @@
 cd C:\overtime-system
 npm start
+
+https://github.com/mangfeel/overtime-system/releases/new 
